@@ -1,0 +1,66 @@
+{
+  "context": "Tests whether the agent correctly implements Java scalar and table UDFs following Flink conventions, builds with the correct Maven shade plugin setup, handles null inputs, and follows the Confluent Cloud UDF deployment workflow.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Extends ScalarFunction",
+      "description": "MaskEmail class extends org.apache.flink.table.functions.ScalarFunction",
+      "max_score": 8
+    },
+    {
+      "name": "Public eval method",
+      "description": "MaskEmail has a public eval(String) method that returns String",
+      "max_score": 8
+    },
+    {
+      "name": "Null handling in scalar",
+      "description": "MaskEmail.eval() checks for null input and returns null (not throwing exception)",
+      "max_score": 10
+    },
+    {
+      "name": "Extends TableFunction",
+      "description": "ExtractPiiFields extends org.apache.flink.table.functions.TableFunction<Row>",
+      "max_score": 8
+    },
+    {
+      "name": "FunctionHint annotation",
+      "description": "ExtractPiiFields uses @FunctionHint with @DataTypeHint specifying the output ROW type",
+      "max_score": 10
+    },
+    {
+      "name": "Collect method usage",
+      "description": "ExtractPiiFields uses collect(Row.of(...)) to emit rows",
+      "max_score": 8
+    },
+    {
+      "name": "Maven shade plugin",
+      "description": "pom.xml includes maven-shade-plugin for building a fat JAR",
+      "max_score": 8
+    },
+    {
+      "name": "Flink dependency provided scope",
+      "description": "flink-table-api-java dependency uses <scope>provided</scope>",
+      "max_score": 8
+    },
+    {
+      "name": "Python udf decorator",
+      "description": "Python UDF uses @udf decorator with result_type parameter from pyflink.table.udf",
+      "max_score": 8
+    },
+    {
+      "name": "Artifact upload command",
+      "description": "Deploy script uses 'confluent flink artifact create' with --cloud, --region, and --artifact-file flags",
+      "max_score": 8
+    },
+    {
+      "name": "CREATE FUNCTION with artifact",
+      "description": "Deploy script includes CREATE FUNCTION ... AS 'class.name' USING JAR 'confluent-artifact://cfa-xxxxx' syntax",
+      "max_score": 8
+    },
+    {
+      "name": "LATERAL TABLE usage",
+      "description": "Example SQL for the table function uses LATERAL TABLE(...) or joinLateral syntax",
+      "max_score": 8
+    }
+  ]
+}

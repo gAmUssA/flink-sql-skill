@@ -1,0 +1,66 @@
+{
+  "context": "Tests whether the agent correctly implements Process Table Functions with state management, timers, proper argument annotations, TTL configuration, and the correct SQL invocation syntax including uid and PARTITION BY.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Extends ProcessTableFunction",
+      "description": "Both classes extend ProcessTableFunction<Row>, not ScalarFunction or TableFunction",
+      "max_score": 10
+    },
+    {
+      "name": "SET_SEMANTIC_TABLE annotation",
+      "description": "Input arguments use @ArgumentHint(SET_SEMANTIC_TABLE) for stateful partitioned processing",
+      "max_score": 10
+    },
+    {
+      "name": "StateHint with TTL",
+      "description": "TransactionVelocityTracker uses @StateHint with ttl annotation (e.g., ttl = \"24h\") on its state",
+      "max_score": 10
+    },
+    {
+      "name": "ValueState for per-key state",
+      "description": "Uses ValueState<T> (or MapView/ListView) as state parameters in the eval method",
+      "max_score": 8
+    },
+    {
+      "name": "OnTimer annotation",
+      "description": "SessionRevenueCalculator has an @OnTimer method for handling session timeout",
+      "max_score": 10
+    },
+    {
+      "name": "Timer registration",
+      "description": "Uses ctx.registerOnTime() to register timers for session expiration",
+      "max_score": 8
+    },
+    {
+      "name": "FunctionHint output type",
+      "description": "Both PTFs have @FunctionHint with @DataTypeHint specifying the output ROW schema",
+      "max_score": 8
+    },
+    {
+      "name": "SQL PARTITION BY",
+      "description": "SQL invocations use TABLE ... PARTITION BY user_id syntax for set-semantic processing",
+      "max_score": 8
+    },
+    {
+      "name": "SQL uid parameter",
+      "description": "SQL invocations include uid => 'some-identifier' for savepoint compatibility",
+      "max_score": 8
+    },
+    {
+      "name": "SQL on_time DESCRIPTOR",
+      "description": "SQL invocations include on_time => DESCRIPTOR(event_time) for event-time ordering",
+      "max_score": 8
+    },
+    {
+      "name": "CAST for time parameter",
+      "description": "Session timeout parameter passed as CAST(900000 AS BIGINT) or similar, not as INTERVAL (due to FLINK-37618)",
+      "max_score": 7
+    },
+    {
+      "name": "Collect Row output",
+      "description": "Both PTFs use collect(Row.of(...)) to emit output rows",
+      "max_score": 5
+    }
+  ]
+}

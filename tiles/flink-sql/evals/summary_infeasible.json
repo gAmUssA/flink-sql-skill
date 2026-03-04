@@ -1,0 +1,13 @@
+{
+  "total_infeasible": 2,
+  "infeasible_scenarios": [
+    {
+      "scenarios": "Live Confluent Cloud deployment",
+      "reasoning": "Requires active Confluent Cloud account, API keys, running Kafka cluster, and compute pool — cannot be tested in a sandbox without credentials"
+    },
+    {
+      "scenarios": "Flink cluster job submission",
+      "reasoning": "Requires running Flink cluster (JobManager/TaskManager) to execute and verify SQL statements — cannot spin up in eval sandbox within time limit"
+    }
+  ]
+}

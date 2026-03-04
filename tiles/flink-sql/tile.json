@@ -1,0 +1,11 @@
+{
+  "name": "gamussa/flink-sql",
+  "version": "1.0.0",
+  "summary": "Apache Flink SQL, Table API, and UDF development for both OSS Flink and Confluent Cloud",
+  "private": false,
+  "skills": {
+    "flink-sql": {
+      "path": "skills/flink-sql/SKILL.md"
+    }
+  }
+}

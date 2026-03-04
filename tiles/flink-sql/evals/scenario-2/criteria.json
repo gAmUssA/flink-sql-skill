@@ -1,0 +1,66 @@
+{
+  "context": "Tests whether the agent correctly uses interval joins, temporal joins, lookup joins, deduplication patterns, CDC ingestion with debezium-json, and upsert-kafka for aggregation output.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Interval join syntax",
+      "description": "Order-shipment join uses BETWEEN ... AND ... + INTERVAL '48' HOUR time bound between the two event-time columns",
+      "max_score": 10
+    },
+    {
+      "name": "Temporal join syntax",
+      "description": "Currency conversion uses JOIN ... FOR SYSTEM_TIME AS OF o.order_time for point-in-time rate lookup",
+      "max_score": 10
+    },
+    {
+      "name": "Lookup join with PROCTIME",
+      "description": "Customer enrichment uses FOR SYSTEM_TIME AS OF proc_time (not event time) and includes a PROCTIME() column definition",
+      "max_score": 10
+    },
+    {
+      "name": "Debezium CDC format",
+      "description": "Customer CDC table uses 'format' = 'debezium-json' in its WITH clause",
+      "max_score": 10
+    },
+    {
+      "name": "CDC primary key",
+      "description": "Customer CDC table declares PRIMARY KEY (customer_id) NOT ENFORCED",
+      "max_score": 5
+    },
+    {
+      "name": "Upsert-kafka connector",
+      "description": "Customer summary output table uses 'connector' = 'upsert-kafka' with key.format and value.format",
+      "max_score": 10
+    },
+    {
+      "name": "Upsert primary key",
+      "description": "Customer summary table has PRIMARY KEY on customer_id NOT ENFORCED",
+      "max_score": 5
+    },
+    {
+      "name": "Deduplication pattern",
+      "description": "Uses ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY order_time DESC) with WHERE rn = 1 for deduplication",
+      "max_score": 10
+    },
+    {
+      "name": "Watermarks on streams",
+      "description": "Both orders and shipments tables declare WATERMARK with bounded out-of-orderness strategy",
+      "max_score": 10
+    },
+    {
+      "name": "Currency rates primary key",
+      "description": "Currency rates table has PRIMARY KEY (currency) NOT ENFORCED for temporal join versioning",
+      "max_score": 5
+    },
+    {
+      "name": "State TTL consideration",
+      "description": "Mentions or configures state TTL (table.exec.state.ttl) for unbounded aggregations",
+      "max_score": 5
+    },
+    {
+      "name": "No unbounded regular join",
+      "description": "Does NOT use a regular equi-join without time bounds for stream-to-stream joins",
+      "max_score": 10
+    }
+  ]
+}

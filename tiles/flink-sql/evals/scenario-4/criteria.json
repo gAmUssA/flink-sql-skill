@@ -1,0 +1,66 @@
+{
+  "context": "Tests whether the agent correctly uses Confluent Cloud-specific APIs (ConfluentSettings, ConfluentTools), Statement Sets for multi-output routing, MATCH_RECOGNIZE for pattern detection, and proper CLI commands for operational tasks including savepoint-based upgrades.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "ConfluentSettings usage",
+      "description": "Java app creates TableEnvironment using ConfluentSettings.fromGlobalVariables()",
+      "max_score": 10
+    },
+    {
+      "name": "ConfluentTools for results",
+      "description": "Java app uses ConfluentTools.printMaterializedLimit() or collectMaterializedLimit() to display results",
+      "max_score": 8
+    },
+    {
+      "name": "Statement Set syntax",
+      "description": "Multi-output routing uses BEGIN STATEMENT SET; ... multiple INSERT INTO ...; END; syntax",
+      "max_score": 10
+    },
+    {
+      "name": "MATCH_RECOGNIZE structure",
+      "description": "Pattern detection uses MATCH_RECOGNIZE with PARTITION BY, ORDER BY, MEASURES, PATTERN, and DEFINE clauses",
+      "max_score": 10
+    },
+    {
+      "name": "System column $rowtime",
+      "description": "Uses $rowtime system column or declares watermark on the TIMESTAMP_LTZ column for Confluent managed tables",
+      "max_score": 8
+    },
+    {
+      "name": "Compute pool create command",
+      "description": "Operations script includes 'confluent flink compute-pool create' with --cloud, --region, and --max-cfu flags",
+      "max_score": 8
+    },
+    {
+      "name": "Statement create command",
+      "description": "Operations script includes 'confluent flink statement create' with --sql and --compute-pool flags",
+      "max_score": 8
+    },
+    {
+      "name": "Savepoint workflow",
+      "description": "Operations script shows savepoint-based upgrade: create savepoint, delete old statement, create new, resume from savepoint",
+      "max_score": 10
+    },
+    {
+      "name": "Exception list command",
+      "description": "Operations script includes 'confluent flink statement exception list' for debugging",
+      "max_score": 5
+    },
+    {
+      "name": "Tumbling window for metrics",
+      "description": "Shipment metrics uses Window TVF TUMBLE syntax with 1-hour interval for hourly aggregation",
+      "max_score": 8
+    },
+    {
+      "name": "Confluent Cloud plugin dependency",
+      "description": "Java app includes confluent-flink-table-api-java-plugin dependency or import",
+      "max_score": 8
+    },
+    {
+      "name": "No unsupported features",
+      "description": "Does NOT use DataStream API, batch mode, or CREATE DATABASE/CATALOG (not supported on Confluent Cloud)",
+      "max_score": 7
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "context": "Tests whether the agent correctly uses Window TVF syntax for all four window types (TUMBLE, HOP, SESSION, CUMULATE), declares proper watermarks on all source tables, and uses bounded out-of-orderness watermark strategy.",
+  "type": "weighted_checklist",
+  "checklist": [
+    {
+      "name": "Tumbling window TVF",
+      "description": "Uses FROM TABLE(TUMBLE(TABLE ..., DESCRIPTOR(...), INTERVAL '1' HOUR)) syntax for hourly aggregation, not legacy GROUP BY TUMBLE()",
+      "max_score": 10
+    },
+    {
+      "name": "Hopping window TVF",
+      "description": "Uses FROM TABLE(HOP(TABLE ..., DESCRIPTOR(...), INTERVAL '5' MINUTE, INTERVAL '1' HOUR)) syntax with correct slide and size parameters",
+      "max_score": 10
+    },
+    {
+      "name": "Session window TVF",
+      "description": "Uses FROM TABLE(SESSION(TABLE ..., DESCRIPTOR(...), INTERVAL '30' MINUTE)) syntax for user activity sessions",
+      "max_score": 10
+    },
+    {
+      "name": "Cumulate window TVF",
+      "description": "Uses FROM TABLE(CUMULATE(TABLE ..., DESCRIPTOR(...), INTERVAL '1' HOUR, INTERVAL '1' DAY)) syntax for daily cumulative with hourly steps",
+      "max_score": 10
+    },
+    {
+      "name": "Sensor watermark declaration",
+      "description": "Declares WATERMARK FOR reading_time AS reading_time - INTERVAL '10' SECOND on the sensor_readings table",
+      "max_score": 10
+    },
+    {
+      "name": "Activity watermark declaration",
+      "description": "Declares WATERMARK FOR activity_time on the app_activity table with bounded out-of-orderness",
+      "max_score": 8
+    },
+    {
+      "name": "Energy watermark declaration",
+      "description": "Declares a WATERMARK on the energy_usage table for the measurement_time column",
+      "max_score": 7
+    },
+    {
+      "name": "Window GROUP BY includes window_start/end",
+      "description": "All window queries GROUP BY window_start, window_end (and relevant keys) as required by Window TVFs",
+      "max_score": 10
+    },
+    {
+      "name": "Kafka connector config",
+      "description": "Source tables use 'connector' = 'kafka' with topic, bootstrap.servers, and format options in WITH clause",
+      "max_score": 5
+    },
+    {
+      "name": "Aggregation functions",
+      "description": "Uses appropriate aggregation functions (AVG for averages, SUM for cumulative totals, COUNT for session event counts)",
+      "max_score": 5
+    },
+    {
+      "name": "DESCRIPTOR references correct column",
+      "description": "Each Window TVF DESCRIPTOR references the watermarked timestamp column of its respective table",
+      "max_score": 10
+    },
+    {
+      "name": "Partition by sensor/user/meter",
+      "description": "Tumbling and hopping windows group by sensor_id, session windows group by user_id",
+      "max_score": 5
+    }
+  ]
+}

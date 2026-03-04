@@ -1,0 +1,220 @@
+{
+  "instructions": [
+    {
+      "instruction": "Use Window TVFs (TUMBLE/HOP/SESSION/CUMULATE) for windowed aggregations, not legacy GROUP BY TUMBLE() syntax",
+      "original_snippets": "Windowed aggregation | Window TVFs (TUMBLE/HOP/SESSION/CUMULATE) ... FROM TABLE(TUMBLE(TABLE orders, DESCRIPTOR(event_time), INTERVAL '1' HOUR))",
+      "relevant_when": "when writing windowed aggregation queries",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Always declare watermarks for event-time processing using WATERMARK FOR col AS expression",
+      "original_snippets": "Always declare watermarks for event-time processing ... WATERMARK FOR event_time AS event_time - INTERVAL '5' SECOND",
+      "relevant_when": "when creating tables with event-time columns",
+      "why_given": "reminder"
+    },
+    {
+      "instruction": "Use bounded out-of-orderness watermark strategy (event_time - INTERVAL 'n' SECOND) as default",
+      "original_snippets": "event_time - INTERVAL 'n' SECOND — bounded out-of-orderness ... event_time — strictly ascending (no late data) ... SOURCE_WATERMARK() — preserve source watermarks",
+      "relevant_when": "when choosing a watermark strategy",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use interval joins for time-bounded stream-to-stream joins with BETWEEN syntax",
+      "original_snippets": "Interval join (time-bounded) ... WHERE o.order_id = s.order_id AND s.ship_time BETWEEN o.order_time AND o.order_time + INTERVAL '4' HOUR",
+      "relevant_when": "when joining two streams with time constraints",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use temporal joins with FOR SYSTEM_TIME AS OF for point-in-time lookups against versioned tables",
+      "original_snippets": "Temporal join (point-in-time lookup) ... JOIN currency_rates FOR SYSTEM_TIME AS OF o.order_time AS r ON o.currency = r.currency",
+      "relevant_when": "when joining with a versioned dimension table using event time",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use lookup joins with FOR SYSTEM_TIME AS OF proc_time for external dimension tables",
+      "original_snippets": "Lookup join (external table) ... JOIN customers FOR SYSTEM_TIME AS OF o.proc_time AS c ON o.customer_id = c.id",
+      "relevant_when": "when enriching a stream with data from an external database",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use ROW_NUMBER() OVER (PARTITION BY key ORDER BY time DESC) WHERE rn = 1 for deduplication",
+      "original_snippets": "Deduplication ... ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY event_time DESC) AS rn ... WHERE rn = 1",
+      "relevant_when": "when deduplicating a stream to keep latest or first record per key",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use MATCH_RECOGNIZE for complex event processing and pattern detection",
+      "original_snippets": "Pattern detection | MATCH_RECOGNIZE ... MATCH_RECOGNIZE (PARTITION BY user_id ORDER BY event_time MEASURES ... PATTERN (A+ B) DEFINE ...)",
+      "relevant_when": "when detecting patterns in event streams",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Configure state TTL to prevent unbounded state growth — unbounded state = memory explosion",
+      "original_snippets": "State TTL matters — unbounded state = memory explosion ... SET 'table.exec.state.ttl' = '24h'",
+      "relevant_when": "when using stateful operations like joins or aggregations without windows",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Know your changelog mode — insert-only vs updating affects downstream consumers",
+      "original_snippets": "Know your changelog mode — insert-only vs updating affects downstream ... Insert-only: Append-only streams (logs, events) ... Upsert: Updates keyed by primary key",
+      "relevant_when": "when deciding sink connector type and downstream compatibility",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use upsert-kafka connector with PRIMARY KEY for tables that need UPDATE/DELETE semantics",
+      "original_snippets": "Upsert to Kafka ... 'connector' = 'upsert-kafka' ... PRIMARY KEY (customer_id) NOT ENFORCED",
+      "relevant_when": "when writing aggregation results or CDC data to Kafka",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Java UDFs must extend ScalarFunction with a public eval() method; handle null inputs",
+      "original_snippets": "public class MyUpperCase extends ScalarFunction { public String eval(String s) { return s == null ? null : s.toUpperCase(); } }",
+      "relevant_when": "when creating a Java scalar UDF",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Java Table functions must extend TableFunction and use collect() to emit rows; use @FunctionHint for output type",
+      "original_snippets": "@FunctionHint(output = @DataTypeHint(\"ROW<word STRING, length INT>\")) public class SplitFunction extends TableFunction<Row> { public void eval(String str) { ... collect(Row.of(s, s.length())); } }",
+      "relevant_when": "when creating a Java table function (UDTF)",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use maven-shade-plugin to build fat JARs for UDF deployment; mark flink-table-api-java as provided scope",
+      "original_snippets": "maven-shade-plugin ... <scope>provided</scope> ... flink-table-api-java",
+      "relevant_when": "when building UDF JAR for deployment",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Deploy UDFs to Confluent Cloud via: build JAR, upload artifact with confluent flink artifact create, register with CREATE FUNCTION ... USING JAR 'confluent-artifact://cfa-xxxxx'",
+      "original_snippets": "confluent flink artifact create my-udf --cloud aws --region us-east-1 --artifact-file target/my-udf-1.0.jar ... CREATE FUNCTION my_upper AS 'com.example.MyUpperCase' USING JAR 'confluent-artifact://cfa-xxxxx'",
+      "relevant_when": "when deploying a UDF to Confluent Cloud",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Confluent Cloud does not support aggregate UDFs, temporary functions, ALTER FUNCTION, UDFs with MATCH_RECOGNIZE, or vararg functions",
+      "original_snippets": "Confluent Cloud limits: ... No aggregate UDFs (only scalar and table functions) ... No MATCH_RECOGNIZE with UDFs",
+      "relevant_when": "when choosing UDF type for Confluent Cloud deployment",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Confluent Cloud max limits: 10 UDFs per statement, 100 artifacts per environment, JDK 17 max, 100 MB max artifact size",
+      "original_snippets": "Max 10 UDFs per statement ... Max 100 artifacts per environment ... JDK 17 max for uploaded JARs",
+      "relevant_when": "when planning UDF deployment to Confluent Cloud",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use ConfluentSettings.fromGlobalVariables() to create TableEnvironment for Confluent Cloud Java Table API",
+      "original_snippets": "TableEnvironment env = TableEnvironment.create(ConfluentSettings.fromGlobalVariables())",
+      "relevant_when": "when writing Java Table API code for Confluent Cloud",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use ConfluentTools.printMaterializedLimit() and collectMaterializedLimit() for displaying results in Confluent Cloud",
+      "original_snippets": "ConfluentTools.printMaterializedLimit(table, 100) ... List<Row> rows = ConfluentTools.collectMaterializedLimit(table, 100)",
+      "relevant_when": "when collecting or printing results from Confluent Cloud Flink",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Confluent Cloud tables have system columns $rowtime (event time from Kafka timestamp) and $headers (Kafka headers)",
+      "original_snippets": "$rowtime | TIMESTAMP_LTZ(3) | Event time from Kafka timestamp ... $headers | MAP<STRING, BYTES> | Kafka headers",
+      "relevant_when": "when querying Confluent Cloud managed tables",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use fully qualified table names in Confluent Cloud: `cluster`.`database`.`topic_name`",
+      "original_snippets": "SELECT * FROM `cluster`.`database`.`topic_name` ... Catalog Structure: <environment> > <kafka-cluster> > <database> > topic",
+      "relevant_when": "when referencing tables in Confluent Cloud Flink SQL",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Process Table Functions (PTFs) extend ProcessTableFunction and support full state access, timers, and changelog handling",
+      "original_snippets": "PTFs are the most powerful function kind in Flink — user-defined operators with full access to state, timers, and changelogs ... extends ProcessTableFunction<Row>",
+      "relevant_when": "when implementing stateful stream processing logic beyond what SQL or simple UDFs can express",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "PTF set semantics use @ArgumentHint(SET_SEMANTIC_TABLE) with PARTITION BY for stateful per-key processing; row semantics use @ArgumentHint(ROW_SEMANTIC_TABLE) for stateless per-row processing",
+      "original_snippets": "Set Semantics (Stateful, Partitioned) ... @ArgumentHint(SET_SEMANTIC_TABLE) Row input ... Row Semantics (Stateless, Per-Row) ... @ArgumentHint(ROW_SEMANTIC_TABLE) Row input",
+      "relevant_when": "when choosing between stateful and stateless PTF processing",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use @StateHint with ttl annotation for PTF state to prevent unbounded state growth",
+      "original_snippets": "@StateHint(ttl = \"30d\") ... @StateHint(ttl = \"24h\") ... @StateHint(ttl = \"7d\")",
+      "relevant_when": "when managing state in Process Table Functions",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Always provide uid parameter for production PTFs for savepoint compatibility",
+      "original_snippets": "Always provide uid for production PTFs — required for savepoint compatibility ... uid => 'my-ptf-v1'",
+      "relevant_when": "when deploying PTFs to production",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use @OnTimer annotation for timer callbacks in PTFs; register timers with ctx.registerOnTime()",
+      "original_snippets": "@OnTimer public void onTimer(Context ctx, ...) ... ctx.registerOnTime(eventTime + sessionTimeoutMillis)",
+      "relevant_when": "when implementing time-based logic in PTFs (session detection, delayed processing)",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use avro-confluent format with Schema Registry options for Avro serialization with Kafka connector",
+      "original_snippets": "'format' = 'avro-confluent' ... 'avro-confluent.url' = 'https://SR_ENDPOINT' ... 'avro-confluent.basic-auth.credentials-source' = 'USER_INFO'",
+      "relevant_when": "when reading/writing Avro data with Schema Registry",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use debezium-json format for consuming CDC data from Debezium connectors",
+      "original_snippets": "'format' = 'debezium-json' ... CREATE TABLE cdc_customers (...) WITH ('connector' = 'kafka', 'topic' = 'dbserver1.inventory.customers', 'format' = 'debezium-json')",
+      "relevant_when": "when consuming Change Data Capture events",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use Statement Sets (BEGIN STATEMENT SET; ... END;) to insert into multiple sinks from the same source",
+      "original_snippets": "Statement Sets (Multi-Insert) ... BEGIN STATEMENT SET; INSERT INTO high_value_orders SELECT ...; INSERT INTO regular_orders SELECT ...; END;",
+      "relevant_when": "when routing events to multiple output tables from one source",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use EXPLAIN to validate SQL query plans without executing",
+      "original_snippets": "EXPLAIN SELECT * FROM orders WHERE amount > 100 ... Use EXPLAIN to validate without executing",
+      "relevant_when": "when debugging or validating Flink SQL queries",
+      "why_given": "reminder"
+    },
+    {
+      "instruction": "Confluent Cloud does not support DataStream API, batch mode, custom connectors, or CREATE DATABASE/CATALOG",
+      "original_snippets": "DataStream API | Not supported (Table API only) ... Batch mode | Not supported (streaming only) ... CREATE DATABASE | Not supported ... CREATE CATALOG | Not supported",
+      "relevant_when": "when planning what features to use on Confluent Cloud",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use savepoints for job updates: stop with savepoint, delete old statement, create new, resume from savepoint",
+      "original_snippets": "confluent flink savepoint create --statement my-job ... confluent flink statement delete my-job ... confluent flink statement resume my-job-v2 --savepoint sp-xxxxx",
+      "relevant_when": "when upgrading or updating a running Flink job",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use CAST(ms AS BIGINT) instead of INTERVAL for PTF arguments due to FLINK-37618",
+      "original_snippets": "Due to FLINK-37618, use CAST(5000 AS BIGINT) instead of INTERVAL '5' SECONDS ... INTERVAL arguments not supported (FLINK-37618)",
+      "relevant_when": "when passing time parameters to Process Table Functions",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Regular joins without time bounds result in unbounded state growth — prefer interval, temporal, or lookup joins",
+      "original_snippets": "CAUTION: State grows unboundedly ... Regular Join (Unbounded State Warning!) ... Use interval join ... Or temporal join ... Or configure TTL",
+      "relevant_when": "when joining two streams",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Lookup joins require processing time attribute (PROCTIME()), not event time",
+      "original_snippets": "Lookup join requires processing time attribute ... Add processing time column ... proc_time AS PROCTIME()",
+      "relevant_when": "when implementing lookup joins against external tables",
+      "why_given": "new knowledge"
+    },
+    {
+      "instruction": "Use Python @udf decorator with result_type for scalar UDFs; use func_type='pandas' for vectorized performance",
+      "original_snippets": "@udf(result_type=DataTypes.STRING()) def to_upper(s: str) -> str: ... @udf(result_type=DataTypes.STRING(), func_type='pandas') def to_upper_vectorized(s):",
+      "relevant_when": "when creating Python UDFs for Flink",
+      "why_given": "new knowledge"
+    }
+  ]
+}
