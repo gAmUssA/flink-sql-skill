@@ -1,0 +1,184 @@
+name: Skill Validation
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'SKILL.md'
+      - 'references/**'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'SKILL.md'
+      - 'references/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Validate Skill Structure
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Validate SKILL.md exists
+        run: |
+          if [ ! -f "SKILL.md" ]; then
+            echo "❌ SKILL.md not found!"
+            exit 1
+          fi
+          echo "✅ SKILL.md exists"
+      
+      - name: Validate SKILL.md frontmatter
+        run: |
+          # Check for YAML frontmatter
+          if ! head -1 SKILL.md | grep -q "^---$"; then
+            echo "❌ SKILL.md missing YAML frontmatter (should start with ---)"
+            exit 1
+          fi
+          echo "✅ SKILL.md has frontmatter"
+          
+          # Check for required fields
+          if ! grep -q "^name:" SKILL.md; then
+            echo "❌ SKILL.md missing 'name:' field in frontmatter"
+            exit 1
+          fi
+          echo "✅ SKILL.md has 'name' field"
+          
+          if ! grep -q "^description:" SKILL.md; then
+            echo "❌ SKILL.md missing 'description:' field in frontmatter"
+            exit 1
+          fi
+          echo "✅ SKILL.md has 'description' field"
+      
+      - name: Check SKILL.md size
+        run: |
+          SIZE=$(wc -c < SKILL.md)
+          LINES=$(wc -l < SKILL.md)
+          echo "📊 SKILL.md: $SIZE bytes, $LINES lines"
+          
+          # Warn if too large (>50KB might be slow to load)
+          if [ $SIZE -gt 51200 ]; then
+            echo "⚠️ Warning: SKILL.md is larger than 50KB. Consider moving content to reference files."
+          fi
+          
+          # Error if too small (probably incomplete)
+          if [ $SIZE -lt 500 ]; then
+            echo "❌ SKILL.md seems too small ($SIZE bytes). Is it complete?"
+            exit 1
+          fi
+          echo "✅ SKILL.md size is reasonable"
+      
+      - name: Validate references directory
+        run: |
+          if [ -d "references" ]; then
+            echo "📁 References directory found"
+            REF_COUNT=$(find references -name "*.md" | wc -l)
+            echo "📊 Found $REF_COUNT reference files"
+            
+            # List reference files
+            for f in references/*.md; do
+              if [ -f "$f" ]; then
+                LINES=$(wc -l < "$f")
+                echo "  - $(basename $f): $LINES lines"
+              fi
+            done
+          else
+            echo "ℹ️ No references directory (optional)"
+          fi
+      
+      - name: Check for broken internal links
+        run: |
+          echo "🔗 Checking internal links in SKILL.md..."
+          ERRORS=0
+          
+          # Extract markdown links to local files
+          grep -oE '\[.*\]\((references/[^)]+)\)' SKILL.md | grep -oE 'references/[^)]+' | while read link; do
+            if [ ! -f "$link" ]; then
+              echo "❌ Broken link: $link"
+              ERRORS=$((ERRORS + 1))
+            else
+              echo "✅ Valid link: $link"
+            fi
+          done
+          
+          if [ $ERRORS -gt 0 ]; then
+            echo "❌ Found $ERRORS broken links"
+            exit 1
+          fi
+          echo "✅ All internal links valid"
+      
+      - name: Validate Markdown syntax
+        run: |
+          echo "📝 Checking Markdown files..."
+          
+          # Check for common issues
+          for f in SKILL.md references/*.md; do
+            if [ -f "$f" ]; then
+              # Check for unclosed code blocks
+              OPEN_BLOCKS=$(grep -c '```' "$f" || true)
+              if [ $((OPEN_BLOCKS % 2)) -ne 0 ]; then
+                echo "⚠️ Warning: $f may have unclosed code blocks ($OPEN_BLOCKS backtick sequences)"
+              fi
+            fi
+          done
+          
+          echo "✅ Markdown syntax check complete"
+      
+      - name: Calculate total content size
+        run: |
+          echo "📊 Content Summary"
+          echo "=================="
+          
+          TOTAL_LINES=0
+          TOTAL_SIZE=0
+          
+          for f in SKILL.md references/*.md; do
+            if [ -f "$f" ]; then
+              LINES=$(wc -l < "$f")
+              SIZE=$(wc -c < "$f")
+              TOTAL_LINES=$((TOTAL_LINES + LINES))
+              TOTAL_SIZE=$((TOTAL_SIZE + SIZE))
+            fi
+          done
+          
+          echo "Total lines: $TOTAL_LINES"
+          echo "Total size: $((TOTAL_SIZE / 1024)) KB"
+          
+          # Summary badge data
+          echo ""
+          echo "✅ Skill validation passed!"
+
+  package:
+    runs-on: ubuntu-latest
+    name: Package Skill
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Create skill package
+        run: |
+          # Create a .skill file (zip with specific structure)
+          SKILL_NAME=$(grep "^name:" SKILL.md | sed 's/name: *//' | tr -d '"')
+          echo "📦 Packaging skill: $SKILL_NAME"
+          
+          mkdir -p dist
+          zip -r "dist/${SKILL_NAME}.skill" SKILL.md references/ -x "*.git*"
+          
+          echo "✅ Created dist/${SKILL_NAME}.skill"
+          ls -la dist/
+      
+      - name: Upload skill artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flink-sql-skill
+          path: dist/*.skill
+          retention-days: 30

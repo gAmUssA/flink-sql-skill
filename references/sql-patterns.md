@@ -1,0 +1,502 @@
+# Flink SQL Patterns Reference
+
+Advanced SQL patterns for stream processing.
+
+## Table of Contents
+
+1. [DDL Patterns](#ddl-patterns)
+2. [Window Patterns](#window-patterns)
+3. [Join Patterns](#join-patterns)
+4. [Aggregation Patterns](#aggregation-patterns)
+5. [CDC Patterns](#cdc-patterns)
+6. [Advanced Queries](#advanced-queries)
+
+## DDL Patterns
+
+### Create Table with Kafka Connector
+
+```sql
+CREATE TABLE orders (
+  order_id STRING,
+  customer_id STRING,
+  amount DECIMAL(10, 2),
+  order_time TIMESTAMP(3),
+  -- Metadata columns
+  `partition` INT METADATA FROM 'partition' VIRTUAL,
+  `offset` BIGINT METADATA FROM 'offset' VIRTUAL,
+  -- Watermark
+  WATERMARK FOR order_time AS order_time - INTERVAL '5' SECOND,
+  -- Primary key for upsert mode
+  PRIMARY KEY (order_id) NOT ENFORCED
+) WITH (
+  'connector' = 'kafka',
+  'topic' = 'orders',
+  'properties.bootstrap.servers' = 'localhost:9092',
+  'properties.group.id' = 'flink-consumer',
+  'scan.startup.mode' = 'earliest-offset',
+  'format' = 'json',
+  'json.timestamp-format.standard' = 'ISO-8601'
+);
+```
+
+### Confluent Cloud Table (Managed)
+
+```sql
+-- Tables created from Kafka topics are auto-discovered
+-- Just reference them:
+SELECT * FROM `cluster`.`database`.`topic_name`;
+
+-- Or create explicitly with specific schema
+CREATE TABLE my_events (
+  event_id STRING,
+  event_type STRING,
+  payload STRING,
+  event_time TIMESTAMP_LTZ(3),
+  WATERMARK FOR event_time AS event_time - INTERVAL '10' SECOND
+);
+```
+
+### Create View
+
+```sql
+-- Simple view
+CREATE VIEW high_value_orders AS
+SELECT * FROM orders WHERE amount > 1000;
+
+-- Materialized aggregation (continuous query)
+CREATE VIEW customer_totals AS
+SELECT 
+  customer_id,
+  COUNT(*) as order_count,
+  SUM(amount) as total_amount
+FROM orders
+GROUP BY customer_id;
+```
+
+## Window Patterns
+
+### Tumbling Window with Multiple Aggregations
+
+```sql
+SELECT 
+  window_start,
+  window_end,
+  product_id,
+  COUNT(*) as sale_count,
+  SUM(quantity) as total_quantity,
+  AVG(price) as avg_price,
+  MIN(price) as min_price,
+  MAX(price) as max_price
+FROM TABLE(
+  TUMBLE(TABLE sales, DESCRIPTOR(sale_time), INTERVAL '1' HOUR)
+)
+GROUP BY window_start, window_end, product_id;
+```
+
+### Hopping Window for Rolling Metrics
+
+```sql
+-- 5-minute slides over 1-hour windows
+SELECT 
+  window_start,
+  window_end,
+  sensor_id,
+  AVG(temperature) as avg_temp,
+  COUNT(*) as reading_count
+FROM TABLE(
+  HOP(
+    TABLE sensor_readings, 
+    DESCRIPTOR(reading_time), 
+    INTERVAL '5' MINUTE,   -- slide
+    INTERVAL '1' HOUR      -- size
+  )
+)
+GROUP BY window_start, window_end, sensor_id;
+```
+
+### Session Window for User Activity
+
+```sql
+SELECT 
+  window_start,
+  window_end,
+  user_id,
+  COUNT(*) as action_count,
+  LISTAGG(action_type, ', ') as actions
+FROM TABLE(
+  SESSION(TABLE user_actions, DESCRIPTOR(action_time), INTERVAL '30' MINUTE)
+)
+GROUP BY window_start, window_end, user_id;
+```
+
+### Cumulating Window for Running Totals
+
+```sql
+-- Daily cumulative with hourly updates
+SELECT 
+  window_start,
+  window_end,
+  SUM(revenue) as cumulative_revenue
+FROM TABLE(
+  CUMULATE(
+    TABLE transactions,
+    DESCRIPTOR(transaction_time),
+    INTERVAL '1' HOUR,  -- step
+    INTERVAL '1' DAY    -- max size
+  )
+)
+GROUP BY window_start, window_end;
+```
+
+### Window with Late Data Handling
+
+```sql
+-- Watermark allows 5 seconds late data
+CREATE TABLE events (
+  event_id STRING,
+  event_time TIMESTAMP(3),
+  WATERMARK FOR event_time AS event_time - INTERVAL '5' SECOND
+) WITH (...);
+
+-- Late events (beyond watermark) are dropped from window results
+```
+
+## Join Patterns
+
+### Regular Join (Unbounded State Warning!)
+
+```sql
+-- CAUTION: State grows unboundedly
+SELECT o.*, c.name
+FROM orders o
+JOIN customers c ON o.customer_id = c.id;
+```
+
+### Interval Join (Time-Bounded)
+
+```sql
+-- Orders joined with shipments within 4 hours
+SELECT 
+  o.order_id,
+  o.order_time,
+  s.ship_time,
+  TIMESTAMPDIFF(MINUTE, o.order_time, s.ship_time) as minutes_to_ship
+FROM orders o, shipments s
+WHERE o.order_id = s.order_id
+  AND s.ship_time BETWEEN o.order_time AND o.order_time + INTERVAL '4' HOUR;
+```
+
+### Temporal Join (Versioned Table)
+
+```sql
+-- Join orders with exchange rates at order time
+SELECT 
+  o.order_id,
+  o.amount,
+  o.currency,
+  r.rate,
+  o.amount * r.rate as amount_usd
+FROM orders o
+JOIN currency_rates FOR SYSTEM_TIME AS OF o.order_time AS r
+ON o.currency = r.currency;
+```
+
+### Lookup Join (External Dimension)
+
+```sql
+-- Enrich with customer data from external DB
+SELECT o.*, c.name, c.email
+FROM orders o
+JOIN customers FOR SYSTEM_TIME AS OF o.proc_time AS c
+ON o.customer_id = c.id;
+```
+
+### Window Join
+
+```sql
+-- Join two windowed streams
+SELECT 
+  L.window_start,
+  L.window_end,
+  L.key,
+  L.left_value,
+  R.right_value
+FROM (
+  SELECT window_start, window_end, key, SUM(value) as left_value
+  FROM TABLE(TUMBLE(TABLE left_stream, DESCRIPTOR(ts), INTERVAL '1' HOUR))
+  GROUP BY window_start, window_end, key
+) L
+JOIN (
+  SELECT window_start, window_end, key, SUM(value) as right_value
+  FROM TABLE(TUMBLE(TABLE right_stream, DESCRIPTOR(ts), INTERVAL '1' HOUR))
+  GROUP BY window_start, window_end, key
+) R
+ON L.key = R.key AND L.window_start = R.window_start;
+```
+
+## Aggregation Patterns
+
+### Group Aggregation with HAVING
+
+```sql
+SELECT 
+  customer_id,
+  COUNT(*) as order_count,
+  SUM(amount) as total_amount
+FROM orders
+GROUP BY customer_id
+HAVING SUM(amount) > 10000;
+```
+
+### Distinct Aggregation
+
+```sql
+SELECT 
+  category,
+  COUNT(DISTINCT user_id) as unique_users,
+  COUNT(*) as total_events
+FROM page_views
+GROUP BY category;
+```
+
+### OVER Aggregation (Running Totals)
+
+```sql
+SELECT 
+  order_id,
+  customer_id,
+  amount,
+  SUM(amount) OVER (
+    PARTITION BY customer_id 
+    ORDER BY order_time
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) as running_total
+FROM orders;
+```
+
+### OVER with Time Range
+
+```sql
+SELECT 
+  event_id,
+  user_id,
+  COUNT(*) OVER (
+    PARTITION BY user_id 
+    ORDER BY event_time
+    RANGE BETWEEN INTERVAL '1' HOUR PRECEDING AND CURRENT ROW
+  ) as events_last_hour
+FROM events;
+```
+
+## CDC Patterns
+
+### Handling Debezium CDC
+
+```sql
+CREATE TABLE cdc_customers (
+  id INT,
+  name STRING,
+  email STRING,
+  updated_at TIMESTAMP(3),
+  PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+  'connector' = 'kafka',
+  'topic' = 'dbserver1.inventory.customers',
+  'properties.bootstrap.servers' = 'localhost:9092',
+  'format' = 'debezium-json'
+);
+```
+
+### Upsert to Kafka
+
+```sql
+CREATE TABLE customer_summary (
+  customer_id STRING,
+  order_count BIGINT,
+  total_amount DECIMAL(10, 2),
+  PRIMARY KEY (customer_id) NOT ENFORCED
+) WITH (
+  'connector' = 'upsert-kafka',
+  'topic' = 'customer-summary',
+  'properties.bootstrap.servers' = 'localhost:9092',
+  'key.format' = 'json',
+  'value.format' = 'json'
+);
+
+INSERT INTO customer_summary
+SELECT 
+  customer_id,
+  COUNT(*) as order_count,
+  SUM(amount) as total_amount
+FROM orders
+GROUP BY customer_id;
+```
+
+## Advanced Queries
+
+### Deduplication (Keep Latest)
+
+```sql
+SELECT *
+FROM (
+  SELECT *,
+    ROW_NUMBER() OVER (
+      PARTITION BY user_id 
+      ORDER BY event_time DESC
+    ) AS rn
+  FROM events
+)
+WHERE rn = 1;
+```
+
+### Deduplication (Keep First)
+
+```sql
+SELECT *
+FROM (
+  SELECT *,
+    ROW_NUMBER() OVER (
+      PARTITION BY user_id 
+      ORDER BY event_time ASC
+    ) AS rn
+  FROM events
+)
+WHERE rn = 1;
+```
+
+### Top-N per Group
+
+```sql
+SELECT *
+FROM (
+  SELECT *,
+    ROW_NUMBER() OVER (
+      PARTITION BY category 
+      ORDER BY sales DESC
+    ) AS rn
+  FROM products
+)
+WHERE rn <= 5;
+```
+
+### MATCH_RECOGNIZE: Fraud Detection
+
+```sql
+SELECT *
+FROM transactions
+MATCH_RECOGNIZE (
+  PARTITION BY account_id
+  ORDER BY transaction_time
+  MEASURES
+    FIRST(A.transaction_time) AS first_txn,
+    LAST(A.transaction_time) AS last_txn,
+    COUNT(A.amount) AS txn_count,
+    SUM(A.amount) AS total_amount
+  ONE ROW PER MATCH
+  AFTER MATCH SKIP PAST LAST ROW
+  PATTERN (A{3,} B)
+  DEFINE
+    A AS A.amount > 1000 AND A.location <> LAG(A.location),
+    B AS B.amount > 5000
+) AS fraud;
+```
+
+### MATCH_RECOGNIZE: Session Detection
+
+```sql
+SELECT *
+FROM page_views
+MATCH_RECOGNIZE (
+  PARTITION BY user_id
+  ORDER BY view_time
+  MEASURES
+    FIRST(A.view_time) AS session_start,
+    LAST(A.view_time) AS session_end,
+    COUNT(*) AS page_count
+  ONE ROW PER MATCH
+  AFTER MATCH SKIP PAST LAST ROW
+  PATTERN (A+)
+  DEFINE
+    A AS LAST(A.view_time, 1) IS NULL 
+         OR A.view_time - LAST(A.view_time, 1) < INTERVAL '30' MINUTE
+);
+```
+
+### JSON Processing
+
+```sql
+-- Extract nested JSON
+SELECT 
+  order_id,
+  JSON_VALUE(payload, '$.customer.name') as customer_name,
+  JSON_VALUE(payload, '$.items[0].product_id') as first_product,
+  JSON_QUERY(payload, '$.items') as all_items
+FROM orders;
+
+-- Explode JSON array
+SELECT 
+  order_id,
+  item.product_id,
+  item.quantity
+FROM orders,
+LATERAL TABLE(JSON_ARRAY_ELEMENTS(JSON_QUERY(payload, '$.items'))) AS item;
+```
+
+### Conditional Aggregation
+
+```sql
+SELECT 
+  window_start,
+  COUNT(*) as total_orders,
+  COUNT(*) FILTER (WHERE status = 'completed') as completed_orders,
+  SUM(amount) FILTER (WHERE status = 'completed') as completed_revenue,
+  AVG(amount) FILTER (WHERE amount > 100) as avg_large_order
+FROM TABLE(TUMBLE(TABLE orders, DESCRIPTOR(order_time), INTERVAL '1' HOUR))
+GROUP BY window_start;
+```
+
+### Set Operations
+
+```sql
+-- Union (removes duplicates)
+SELECT user_id, event_type FROM web_events
+UNION
+SELECT user_id, event_type FROM mobile_events;
+
+-- Union All (keeps duplicates)
+SELECT user_id, event_type FROM web_events
+UNION ALL
+SELECT user_id, event_type FROM mobile_events;
+
+-- Intersect
+SELECT user_id FROM active_users
+INTERSECT
+SELECT user_id FROM premium_users;
+
+-- Except
+SELECT user_id FROM all_users
+EXCEPT
+SELECT user_id FROM churned_users;
+```
+
+### Statement Sets (Multi-Insert)
+
+```sql
+-- Insert to multiple sinks from same source
+BEGIN STATEMENT SET;
+
+INSERT INTO high_value_orders
+SELECT * FROM orders WHERE amount > 1000;
+
+INSERT INTO regular_orders  
+SELECT * FROM orders WHERE amount <= 1000;
+
+INSERT INTO order_metrics
+SELECT 
+  DATE_FORMAT(order_time, 'yyyy-MM-dd') as order_date,
+  COUNT(*) as order_count
+FROM orders
+GROUP BY DATE_FORMAT(order_time, 'yyyy-MM-dd');
+
+END;
+```
