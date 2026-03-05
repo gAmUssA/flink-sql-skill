@@ -4,85 +4,99 @@ on:
   push:
     branches: [ main, master ]
     paths:
-      - 'SKILL.md'
-      - 'references/**'
+      - 'tiles/flink-sql/**'
   pull_request:
     branches: [ main, master ]
     paths:
-      - 'SKILL.md'
-      - 'references/**'
+      - 'tiles/flink-sql/**'
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     name: Validate Skill Structure
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
+      - name: Validate tile.json exists
+        run: |
+          if [ ! -f "tiles/flink-sql/tile.json" ]; then
+            echo "❌ tile.json not found!"
+            exit 1
+          fi
+          echo "✅ tile.json exists"
+
+          # Validate JSON syntax
+          python3 -c "import json; json.load(open('tiles/flink-sql/tile.json'))"
+          echo "✅ tile.json is valid JSON"
+
       - name: Validate SKILL.md exists
         run: |
-          if [ ! -f "SKILL.md" ]; then
+          if [ ! -f "tiles/flink-sql/skills/flink-sql/SKILL.md" ]; then
             echo "❌ SKILL.md not found!"
             exit 1
           fi
           echo "✅ SKILL.md exists"
-      
+
       - name: Validate SKILL.md frontmatter
         run: |
+          SKILL_PATH="tiles/flink-sql/skills/flink-sql/SKILL.md"
+
           # Check for YAML frontmatter
-          if ! head -1 SKILL.md | grep -q "^---$"; then
+          if ! head -1 "$SKILL_PATH" | grep -q "^---$"; then
             echo "❌ SKILL.md missing YAML frontmatter (should start with ---)"
             exit 1
           fi
           echo "✅ SKILL.md has frontmatter"
-          
+
           # Check for required fields
-          if ! grep -q "^name:" SKILL.md; then
+          if ! grep -q "^name:" "$SKILL_PATH"; then
             echo "❌ SKILL.md missing 'name:' field in frontmatter"
             exit 1
           fi
           echo "✅ SKILL.md has 'name' field"
-          
-          if ! grep -q "^description:" SKILL.md; then
+
+          if ! grep -q "^description:" "$SKILL_PATH"; then
             echo "❌ SKILL.md missing 'description:' field in frontmatter"
             exit 1
           fi
           echo "✅ SKILL.md has 'description' field"
-      
+
       - name: Check SKILL.md size
         run: |
-          SIZE=$(wc -c < SKILL.md)
-          LINES=$(wc -l < SKILL.md)
+          SKILL_PATH="tiles/flink-sql/skills/flink-sql/SKILL.md"
+          SIZE=$(wc -c < "$SKILL_PATH")
+          LINES=$(wc -l < "$SKILL_PATH")
           echo "📊 SKILL.md: $SIZE bytes, $LINES lines"
-          
+
           # Warn if too large (>50KB might be slow to load)
           if [ $SIZE -gt 51200 ]; then
             echo "⚠️ Warning: SKILL.md is larger than 50KB. Consider moving content to reference files."
           fi
-          
+
           # Error if too small (probably incomplete)
           if [ $SIZE -lt 500 ]; then
             echo "❌ SKILL.md seems too small ($SIZE bytes). Is it complete?"
             exit 1
           fi
           echo "✅ SKILL.md size is reasonable"
-      
+
       - name: Validate references directory
         run: |
-          if [ -d "references" ]; then
+          REF_DIR="tiles/flink-sql/skills/flink-sql/references"
+          if [ -d "$REF_DIR" ]; then
             echo "📁 References directory found"
-            REF_COUNT=$(find references -name "*.md" | wc -l)
+            REF_COUNT=$(find "$REF_DIR" -name "*.md" | wc -l)
             echo "📊 Found $REF_COUNT reference files"
-            
+
             # List reference files
-            for f in references/*.md; do
+            for f in "$REF_DIR"/*.md; do
               if [ -f "$f" ]; then
                 LINES=$(wc -l < "$f")
                 echo "  - $(basename $f): $LINES lines"
@@ -91,34 +105,37 @@ jobs:
           else
             echo "ℹ️ No references directory (optional)"
           fi
-      
+
       - name: Check for broken internal links
         run: |
+          SKILL_PATH="tiles/flink-sql/skills/flink-sql/SKILL.md"
+          SKILL_DIR="tiles/flink-sql/skills/flink-sql"
           echo "🔗 Checking internal links in SKILL.md..."
           ERRORS=0
-          
+
           # Extract markdown links to local files
-          grep -oE '\[.*\]\((references/[^)]+)\)' SKILL.md | grep -oE 'references/[^)]+' | while read link; do
-            if [ ! -f "$link" ]; then
+          grep -oE '\[.*\]\((references/[^)]+)\)' "$SKILL_PATH" | grep -oE 'references/[^)]+' | while read link; do
+            if [ ! -f "$SKILL_DIR/$link" ]; then
               echo "❌ Broken link: $link"
               ERRORS=$((ERRORS + 1))
             else
               echo "✅ Valid link: $link"
             fi
           done
-          
+
           if [ $ERRORS -gt 0 ]; then
             echo "❌ Found $ERRORS broken links"
             exit 1
           fi
           echo "✅ All internal links valid"
-      
+
       - name: Validate Markdown syntax
         run: |
           echo "📝 Checking Markdown files..."
-          
+          SKILL_DIR="tiles/flink-sql/skills/flink-sql"
+
           # Check for common issues
-          for f in SKILL.md references/*.md; do
+          for f in "$SKILL_DIR/SKILL.md" "$SKILL_DIR"/references/*.md; do
             if [ -f "$f" ]; then
               # Check for unclosed code blocks
               OPEN_BLOCKS=$(grep -c '```' "$f" || true)
@@ -127,18 +144,22 @@ jobs:
               fi
             fi
           done
-          
+
           echo "✅ Markdown syntax check complete"
-      
+
+      - name: Run validation script
+        run: python scripts/validate.py
+
       - name: Calculate total content size
         run: |
           echo "📊 Content Summary"
           echo "=================="
-          
+          SKILL_DIR="tiles/flink-sql/skills/flink-sql"
+
           TOTAL_LINES=0
           TOTAL_SIZE=0
-          
-          for f in SKILL.md references/*.md; do
+
+          for f in "$SKILL_DIR/SKILL.md" "$SKILL_DIR"/references/*.md; do
             if [ -f "$f" ]; then
               LINES=$(wc -l < "$f")
               SIZE=$(wc -c < "$f")
@@ -146,11 +167,10 @@ jobs:
               TOTAL_SIZE=$((TOTAL_SIZE + SIZE))
             fi
           done
-          
+
           echo "Total lines: $TOTAL_LINES"
           echo "Total size: $((TOTAL_SIZE / 1024)) KB"
-          
-          # Summary badge data
+
           echo ""
           echo "✅ Skill validation passed!"
 
@@ -159,26 +179,27 @@ jobs:
     name: Package Skill
     needs: validate
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Create skill package
         run: |
-          # Create a .skill file (zip with specific structure)
-          SKILL_NAME=$(grep "^name:" SKILL.md | sed 's/name: *//' | tr -d '"')
+          SKILL_NAME=$(grep "^name:" tiles/flink-sql/skills/flink-sql/SKILL.md | sed 's/name: *//' | tr -d '"')
           echo "📦 Packaging skill: $SKILL_NAME"
-          
+
           mkdir -p dist
-          zip -r "dist/${SKILL_NAME}.skill" SKILL.md references/ -x "*.git*"
-          
-          echo "✅ Created dist/${SKILL_NAME}.skill"
+          cd tiles/flink-sql
+          zip -r "../../dist/${SKILL_NAME}-tile.zip" tile.json skills/ evals/ -x "*.git*"
+          cd ../..
+
+          echo "✅ Created dist/${SKILL_NAME}-tile.zip"
           ls -la dist/
-      
+
       - name: Upload skill artifact
         uses: actions/upload-artifact@v4
         with:
-          name: flink-sql-skill
-          path: dist/*.skill
+          name: flink-sql-tile
+          path: dist/*-tile.zip
           retention-days: 30
