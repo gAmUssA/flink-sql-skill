@@ -20,6 +20,9 @@ Stream processing with SQL semantics. Tables that change over time — think of 
 | Join streams | Interval joins, temporal joins, lookup joins |
 | Deduplication | ROW_NUMBER() with OVER clause |
 | Top-N queries | ROW_NUMBER() OVER (ORDER BY ...) |
+| Row-to-row comparison | LAG/LEAD window functions |
+| Late data routing | CURRENT_WATERMARK() + Statement Sets |
+| Multi-level aggregation | Chained windows (fine → coarse) |
 
 ## Mental Model: Streams ↔ Tables
 
@@ -318,7 +321,7 @@ CREATE TABLE events (
 | `Cannot resolve watermark` | Missing watermark declaration | Add `WATERMARK FOR col AS ...` |
 | `Schema mismatch` | Column types don't align | Check data types with `DESCRIBE table` |
 | `State too large` | Unbounded aggregation | Add state TTL or use windows |
-| `Late data dropped` | Watermark too aggressive | Increase watermark delay |
+| `Late data dropped` | Watermark too aggressive | Increase watermark delay, or route late data with `CURRENT_WATERMARK()` (see sql-patterns.md) |
 | `UDF not found` | Function not registered | Check catalog/database scope |
 
 For detailed troubleshooting: **See [troubleshooting.md](references/troubleshooting.md)**

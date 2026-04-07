@@ -161,6 +161,35 @@ CREATE TABLE events (
 -- Late events (beyond watermark) are dropped from window results
 ```
 
+### Chained Windows (Multi-Level Aggregation)
+
+Feed fine-grained window results into a coarser window to reduce computation:
+
+```sql
+-- Step 1: 1-minute pre-aggregation
+CREATE VIEW minute_stats AS
+SELECT
+  window_start,
+  window_end,
+  sensor_id,
+  AVG(temperature) as avg_temp,
+  COUNT(*) as reading_count
+FROM TABLE(TUMBLE(TABLE sensor_readings, DESCRIPTOR(reading_time), INTERVAL '1' MINUTE))
+GROUP BY window_start, window_end, sensor_id;
+
+-- Step 2: 5-minute aggregation from pre-aggregated results
+SELECT
+  window_start,
+  window_end,
+  sensor_id,
+  AVG(avg_temp) as avg_temp_5m,
+  SUM(reading_count) as total_readings_5m
+FROM TABLE(TUMBLE(TABLE minute_stats, DESCRIPTOR(window_end), INTERVAL '5' MINUTE))
+GROUP BY window_start, window_end, sensor_id;
+```
+
+> **Tip:** Chaining reduces the number of rows the coarser window processes. Especially useful when the fine-grained window has high cardinality.
+
 ## Join Patterns
 
 ### Regular Join (Unbounded State Warning!)
@@ -234,6 +263,50 @@ JOIN (
 ON L.key = R.key AND L.window_start = R.window_start;
 ```
 
+### Star Schema (N-Way Temporal Joins)
+
+Enrich a fact stream with multiple dimension tables in a single query:
+
+```sql
+-- Denormalize train activities with station, passenger, and channel dimensions
+SELECT
+  a.activity_id,
+  a.activity_time,
+  s.station_name,
+  s.city,
+  p.passenger_name,
+  c.channel_type
+FROM train_activities a
+JOIN stations FOR SYSTEM_TIME AS OF a.activity_time AS s
+  ON a.station_id = s.station_id
+JOIN passengers FOR SYSTEM_TIME AS OF a.activity_time AS p
+  ON a.passenger_id = p.passenger_id
+JOIN booking_channels FOR SYSTEM_TIME AS OF a.activity_time AS c
+  ON a.channel_id = c.channel_id;
+```
+
+> **Warning:** Each temporal join adds state. Monitor state size when joining many dimensions.
+
+### Lateral Join (Correlated Subquery)
+
+Evaluate a correlated subquery per input row with automatic retraction on updates. Note: this is distinct from `LATERAL TABLE(udtf())` used for table function expansion (see udf-guide.md).
+
+```sql
+-- For each state, find top 2 cities by population (updates as population changes)
+SELECT
+  s.state,
+  c.city,
+  c.population
+FROM states s,
+LATERAL (
+  SELECT city, population
+  FROM cities
+  WHERE cities.state_id = s.state_id
+  ORDER BY population DESC
+  LIMIT 2
+) AS c;
+```
+
 ## Aggregation Patterns
 
 ### Group Aggregation with HAVING
@@ -286,6 +359,70 @@ SELECT
     RANGE BETWEEN INTERVAL '1' HOUR PRECEDING AND CURRENT ROW
   ) as events_last_hour
 FROM events;
+```
+
+### OVER with Statistical Functions (Outlier Detection)
+
+```sql
+-- Flag readings more than 2 standard deviations from rolling average
+SELECT
+  sensor_id,
+  reading_time,
+  temperature,
+  avg_temp,
+  stddev_temp,
+  CASE 
+    WHEN ABS(temperature - avg_temp) > 2 * stddev_temp THEN 'OUTLIER'
+    ELSE 'NORMAL'
+  END AS status
+FROM (
+  SELECT
+    sensor_id,
+    reading_time,
+    temperature,
+    AVG(temperature) OVER w AS avg_temp,
+    STDDEV(temperature) OVER w AS stddev_temp
+  FROM sensor_readings
+  WINDOW w AS (
+    PARTITION BY sensor_id
+    ORDER BY reading_time
+    RANGE BETWEEN INTERVAL '1' HOUR PRECEDING AND CURRENT ROW
+  )
+);
+```
+
+### LAG/LEAD Window Functions
+
+Row-to-row comparison for trend detection. Note: `LAG` here is a standard window function — distinct from `LAG()` inside MATCH_RECOGNIZE DEFINE clauses (see Pattern Detection section).
+
+```sql
+-- Detect price movement direction
+SELECT
+  product_id,
+  event_time,
+  price,
+  LAG(price) OVER (PARTITION BY product_id ORDER BY event_time) AS prev_price,
+  CASE
+    WHEN price > LAG(price) OVER (PARTITION BY product_id ORDER BY event_time) THEN '▲'
+    WHEN price < LAG(price) OVER (PARTITION BY product_id ORDER BY event_time) THEN '▼'
+    ELSE '='
+  END AS trend
+FROM price_updates;
+```
+
+### Streaming ORDER BY Constraints
+
+In streaming mode, standalone `ORDER BY` requires a **time attribute** — Flink cannot sort an unbounded stream arbitrarily.
+
+```sql
+-- ✅ Valid: ORDER BY time attribute
+SELECT * FROM events ORDER BY event_time;
+
+-- ✅ Valid: ORDER BY with LIMIT (bounded result)
+SELECT * FROM events ORDER BY amount DESC LIMIT 10;
+
+-- ❌ Invalid in streaming: ORDER BY non-time column without LIMIT
+-- SELECT * FROM events ORDER BY amount;  -- fails
 ```
 
 ## CDC Patterns
@@ -499,4 +636,87 @@ FROM orders
 GROUP BY DATE_FORMAT(order_time, 'yyyy-MM-dd');
 
 END;
+```
+
+### Window Top-N
+
+Unlike continuous Top-N above (which emits updating results), Window Top-N emits **final results per window** — no retractions.
+
+```sql
+-- Top 3 suppliers per 5-minute window (final, non-updating results)
+SELECT *
+FROM (
+  SELECT *,
+    ROW_NUMBER() OVER (
+      PARTITION BY window_start, window_end
+      ORDER BY total_sales DESC
+    ) AS rn
+  FROM (
+    SELECT 
+      window_start, window_end,
+      supplier_id,
+      SUM(sales) as total_sales
+    FROM TABLE(TUMBLE(TABLE orders, DESCRIPTOR(order_time), INTERVAL '5' MINUTE))
+    GROUP BY window_start, window_end, supplier_id
+  )
+)
+WHERE rn <= 3;
+```
+
+### Late Data Routing with CURRENT_WATERMARK
+
+Instead of dropping late data, route it to a separate sink for reprocessing:
+
+```sql
+-- Fork timely vs late data using CURRENT_WATERMARK
+BEGIN STATEMENT SET;
+
+INSERT INTO timely_events
+SELECT * FROM events
+WHERE event_time >= CURRENT_WATERMARK(event_time);
+
+INSERT INTO late_events
+SELECT * FROM events
+WHERE event_time < CURRENT_WATERMARK(event_time);
+
+END;
+```
+
+> **Tip:** Combine with Statement Sets (above) to process both paths in a single Flink job.
+
+### SQL Hints (Runtime Connector Override)
+
+Override table connector properties at query time without modifying catalog definitions:
+
+```sql
+-- Read from latest offset (ignoring catalog's startup mode)
+SELECT * FROM orders /*+ OPTIONS('scan.startup.mode' = 'latest-offset') */;
+
+-- Override parallelism for a specific scan
+SELECT * FROM events /*+ OPTIONS('scan.parallelism' = '4') */;
+
+-- Change format for debugging
+SELECT * FROM raw_logs /*+ OPTIONS('format' = 'raw') */;
+```
+
+### CROSS JOIN UNNEST (Array Expansion)
+
+Expand typed ARRAY columns into individual rows. Note: for JSON arrays, see JSON Processing above.
+
+```sql
+-- Expand an ARRAY column into rows
+SELECT
+  order_id,
+  tag
+FROM orders
+CROSS JOIN UNNEST(tags) AS T(tag);
+
+-- With preserved columns
+SELECT
+  order_id,
+  customer_id,
+  item_id,
+  item_qty
+FROM orders
+CROSS JOIN UNNEST(items_id, items_qty) AS T(item_id, item_qty);
 ```
