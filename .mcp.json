@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "tessl": {
+      "type": "stdio",
+      "command": "tessl",
+      "args": [
+        "mcp",
+        "start"
+      ]
+    },
+    "confluent-cloud": {
+      "type": "sse",
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}
