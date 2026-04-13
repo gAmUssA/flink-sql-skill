@@ -233,12 +233,23 @@ ON o.currency = r.currency;
 ### Lookup Join (External Dimension)
 
 ```sql
--- Enrich with customer data from external DB
+-- Enrich with customer data from external DB (OSS Flink)
 SELECT o.*, c.name, c.email
 FROM orders o
 JOIN customers FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
+
+> **⚠️ Confluent Cloud:** `PROCTIME()` is **not supported** and there's no JDBC lookup connector. For current-value lookup semantics on CC, use a regular join against an `upsert-kafka` reference table:
+>
+> ```sql
+> SELECT o.*, c.name
+> FROM orders o
+> LEFT JOIN customers_ref c   -- compacted upsert-kafka
+>   ON o.customer_id = c.id;
+> ```
+>
+> This produces a changelog stream, so **the sink must be `changelog.mode = 'upsert'` with a `PRIMARY KEY`**, and the query **cannot** include `CURRENT_TIMESTAMP` or other non-deterministic functions. See [confluent-cloud.md](confluent-cloud.md#proctime-is-not-supported).
 
 ### Window Join
 

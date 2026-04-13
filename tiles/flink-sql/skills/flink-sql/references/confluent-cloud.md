@@ -436,8 +436,74 @@ confluent flink statement describe my-statement
 | CREATE DATABASE | Not supported |
 | CREATE CATALOG | Not supported |
 | File connectors | Not supported |
-| JDBC connector | Limited (lookup only) |
+| JDBC connector | Not supported (no lookup joins) |
 | Hive integration | Not supported |
+| `PROCTIME()` function | **Not supported** — see below |
+| `CURRENT_TIMESTAMP` in update queries | Rejected as non-deterministic — see below |
+
+### PROCTIME() is not supported
+
+Confluent Cloud Flink rejects `PROCTIME()` with:
+> `Function 'PROCTIME' is not supported in Confluent's Flink SQL dialect.`
+
+This means the textbook lookup-join pattern doesn't work:
+
+```sql
+-- ❌ FAILS on Confluent Cloud
+SELECT o.*, c.name
+FROM orders o
+LEFT JOIN customers FOR SYSTEM_TIME AS OF PROCTIME() AS c
+  ON o.customer_id = c.id;
+```
+
+**Workarounds for "current-value lookup" semantics:**
+
+1. **Regular join against upsert-kafka** — the upsert stream acts as a dynamic table; its current state is held in the join operator. Produces a changelog sink (see next section).
+   ```sql
+   SELECT o.*, c.name
+   FROM orders o
+   LEFT JOIN customers_upsert c  -- upsert-kafka
+     ON o.customer_id = c.id;
+   ```
+2. **Event-time temporal join** — if the reference side has a watermark, use `FOR SYSTEM_TIME AS OF o.order_time` instead.
+3. **System rowtime** — `FOR SYSTEM_TIME AS OF o.$rowtime` uses Kafka ingestion time (requires the right side to have a watermark declared).
+
+### Regular joins against upsert streams produce changelog output
+
+A regular JOIN between an append stream and an upsert-kafka table emits UPDATE/DELETE messages (not insert-only). If the sink is declared `'changelog.mode' = 'append'` the statement fails with:
+
+> `Table sink '...' doesn't support consuming update and delete changes`
+
+**Fix:** declare the sink as upsert with a PRIMARY KEY:
+
+```sql
+CREATE TABLE orders_enriched (
+  order_id STRING NOT NULL,
+  customer_name STRING,
+  ...,
+  PRIMARY KEY (order_id) NOT ENFORCED
+) WITH (
+  'changelog.mode' = 'upsert',    -- was 'append'
+  ...
+);
+```
+
+You'll also see two startup warnings that are mostly cosmetic:
+- *"primary key does not match the upsert key"* — Flink adds a correction operator
+- *"highly state-intensive operators without TTL"* — consider a state TTL if the reference side is large
+
+### Non-deterministic functions rejected in update-producing queries
+
+Any query that produces updates/deletes cannot include non-deterministic functions like `CURRENT_TIMESTAMP`, `NOW()`, `RAND()`:
+
+> `The column(s) ... can not satisfy the determinism requirement for correctly processing update message`
+
+**Why:** Flink may need to replay updates; if the function returns different values on replay, the output becomes inconsistent.
+
+**Fixes:**
+- Remove the non-deterministic column, or
+- Carry the timestamp from the source row (e.g., use `o.order_time` instead of `CURRENT_TIMESTAMP`), or
+- Keep the query insert-only (no upsert joins)
 
 ### Supported Regions
 
