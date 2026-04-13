@@ -30,12 +30,12 @@ For a true per-row HTTP call you'd need a Java `AsyncTableFunction` UDF on Confl
 
 ## Tradeoffs (same as the article)
 
-| Aspect         | Behavior                                                                 |
-|----------------|--------------------------------------------------------------------------|
-| Consistency    | Reads latest value of reference table at processing time                 |
-| Scale          | Doesn't scale — every row triggers a lookup. State grows with ref table  |
-| Startup        | Immediate — works as soon as customers_ref has data                      |
-| Staleness      | Depends on how fresh the Kafka topic is kept                             |
+| Aspect      | Behavior                                                                |
+|-------------|-------------------------------------------------------------------------|
+| Consistency | Reads latest value of reference table at processing time                |
+| Scale       | Doesn't scale — every row triggers a lookup. State grows with ref table |
+| Startup     | Immediate — works as soon as customers_ref has data                     |
+| Staleness   | Depends on how fresh the Kafka topic is kept                            |
 
 ## Confluent Cloud gotcha
 

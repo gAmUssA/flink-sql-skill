@@ -32,12 +32,12 @@ If orders arrive **before** their corresponding customer records, the join will 
 
 This demo deliberately uses `INNER JOIN` so you can *see* the warmup gap by ordering inserts carefully:
 
-| Step | Insert                                                    | Result                                              |
-|------|-----------------------------------------------------------|-----------------------------------------------------|
-| 1    | Order `o-1001` (customer c-001 @ 10:01:00)                | No output (c-001 not yet in state)                  |
-| 2    | Customer c-001 @ 10:00:00 arrives in CDC                  | Order `o-1001` now emits with c-001's data          |
-| 3    | Order `o-1002` arrives (customer c-002 @ 10:02:00)        | No output yet                                       |
-| 4    | Customer c-002 @ 10:00:01 arrives                         | Order `o-1002` emits                                |
+| Step | Insert                                             | Result                                     |
+|------|----------------------------------------------------|--------------------------------------------|
+| 1    | Order `o-1001` (customer c-001 @ 10:01:00)         | No output (c-001 not yet in state)         |
+| 2    | Customer c-001 @ 10:00:00 arrives in CDC           | Order `o-1001` now emits with c-001's data |
+| 3    | Order `o-1002` arrives (customer c-002 @ 10:02:00) | No output yet                              |
+| 4    | Customer c-002 @ 10:00:01 arrives                  | Order `o-1002` emits                       |
 
 This demonstrates the article's "eventual convergence" property — the system will converge once enough CDC data has accumulated.
 
