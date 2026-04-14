@@ -436,7 +436,7 @@ confluent flink statement describe my-statement
 | CREATE DATABASE | Not supported |
 | CREATE CATALOG | Not supported |
 | File connectors | Not supported |
-| JDBC connector | Not supported (no lookup joins) |
+| Classic JDBC lookup join (`FOR SYSTEM_TIME AS OF PROCTIME()`) | Not supported — use **External Tables / `KEY_SEARCH_AGG`** instead (below) |
 | Hive integration | Not supported |
 | `PROCTIME()` function | **Not supported** — see below |
 | `CURRENT_TIMESTAMP` in update queries | Rejected as non-deterministic — see below |
@@ -458,15 +458,104 @@ LEFT JOIN customers FOR SYSTEM_TIME AS OF PROCTIME() AS c
 
 **Workarounds for "current-value lookup" semantics:**
 
-1. **Regular join against upsert-kafka** — the upsert stream acts as a dynamic table; its current state is held in the join operator. Produces a changelog sink (see next section).
+1. **External Tables + `KEY_SEARCH_AGG`** — the canonical CC path for per-row lookups against an external database (Postgres/MySQL/SQL Server/Oracle), REST API, MongoDB, or Couchbase. See the "External Tables" section below. No proctime needed.
+2. **Regular join against upsert-kafka** — if the reference data is already in a compacted Kafka topic, the upsert stream acts as a dynamic table and its current state is held in the join operator. Produces a changelog sink.
    ```sql
    SELECT o.*, c.name
    FROM orders o
    LEFT JOIN customers_upsert c  -- upsert-kafka
      ON o.customer_id = c.id;
    ```
-2. **Event-time temporal join** — if the reference side has a watermark, use `FOR SYSTEM_TIME AS OF o.order_time` instead.
-3. **System rowtime** — `FOR SYSTEM_TIME AS OF o.$rowtime` uses Kafka ingestion time (requires the right side to have a watermark declared).
+3. **Event-time temporal join** — if the reference side has a watermark, use `FOR SYSTEM_TIME AS OF o.order_time` instead.
+4. **System rowtime** — `FOR SYSTEM_TIME AS OF o.$rowtime` uses Kafka ingestion time (requires the right side to have a watermark declared).
+
+### External Tables (Key Search)
+
+Confluent Cloud Flink provides read-only **External Tables** for federated lookups against databases and REST APIs. This is the supported path for per-row enrichment from an external system — it replaces the OSS Flink JDBC/HBase lookup-join connectors.
+
+**Supported connectors:**
+
+| Connector        | `connector` option value | Dialects / backends                          |
+|------------------|--------------------------|-----------------------------------------------|
+| Confluent JDBC   | `confluent-jdbc`         | Postgres, MySQL, SQL Server, Oracle           |
+| REST             | `rest`                   | Any HTTPS JSON endpoint                       |
+| MongoDB          | `mongodb`                | MongoDB Atlas                                 |
+| Couchbase        | `couchbase`              | Couchbase                                     |
+
+**Three built-in TVFs** operate over external tables:
+- `KEY_SEARCH_AGG(ext_table, DESCRIPTOR(key_col), search_col)` — exact-key lookup
+- `TEXT_SEARCH_AGG(...)` — text / full-text search
+- `VECTOR_SEARCH_AGG(...)` — vector / semantic search (requires an embedding)
+
+**Two-step setup** — a `CREATE CONNECTION` (endpoint + credentials) then a `CREATE TABLE` that references it.
+
+```sql
+-- Step 1: connection (holds endpoint + credentials)
+CREATE CONNECTION jdbc_postgres_connection
+  WITH (
+    'type' = 'confluent_jdbc',     -- NOTE: underscore form in CREATE CONNECTION
+    'endpoint' = '<jdbc_url>',
+    'username' = '<username>',
+    'password' = '<password>',
+    'environment' = '<ENV_ID>'
+  );
+
+-- Step 2: external table
+CREATE TABLE netflix_shows (
+    show_id STRING,
+    title STRING,
+    release_year INT,
+    rating STRING
+) WITH (
+    'connector' = 'confluent-jdbc',           -- NOTE: hyphen form in CREATE TABLE
+    'confluent-jdbc.connection' = 'jdbc_postgres_connection',
+    'confluent-jdbc.table-name' = 'netflix_shows'
+);
+```
+
+> **Naming gotcha:** connection type uses an underscore (`confluent_jdbc`), but the `CREATE TABLE` `connector` option uses a hyphen (`confluent-jdbc`). Both forms appear verbatim in the Confluent docs.
+
+**Usage — `KEY_SEARCH_AGG` + `CROSS JOIN UNNEST`:**
+
+The function returns an array column named `search_results`. Flatten it with `UNNEST`:
+
+```sql
+SELECT t.*
+FROM input_titles,
+LATERAL TABLE(KEY_SEARCH_AGG(netflix_shows, DESCRIPTOR(title), title))
+CROSS JOIN UNNEST(search_results)
+  AS t(show_id, title, release_year, rating);
+```
+
+**Tuning options** via the optional `map[...]` 4th argument:
+
+```sql
+LATERAL TABLE(KEY_SEARCH_AGG(
+  netflix_shows, DESCRIPTOR(title), title,
+  MAP['async_enabled', 'true',
+      'client_timeout', '30',
+      'max_parallelism', '10',
+      'retry_count', '3']
+))
+```
+
+| Option              | Default | Notes                                                                 |
+|---------------------|---------|-----------------------------------------------------------------------|
+| `async_enabled`     | `true`  | Non-blocking lookups                                                  |
+| `client_timeout`    | `30`    | Seconds                                                               |
+| `max_parallelism`   | `10`    | Only applies when `async_enabled = true`                              |
+| `retry_count`       | `3`     |                                                                       |
+| `retry_error_list`  | —       | Comma-separated error codes that trigger retry                        |
+| `debug`             | `false` | Returns stack traces in `$errors` — may leak prompt/response content  |
+
+**Limitations:**
+- **Single-column key only.** No composite keys.
+- **Output is an array.** Always follow with `CROSS JOIN UNNEST(search_results) AS t(...)`.
+- **No documented cache / TTL knobs.** Unlike OSS JDBC lookup joins, there's no `lookup.cache.*` setting.
+- **REST-specific:** HTTPS only, endpoint cannot be an IP, endpoint cannot be under `confluent.cloud`, auth header format is fixed.
+- **No `PROCTIME()` needed** — the pattern uses `LATERAL TABLE(...)`, not `FOR SYSTEM_TIME AS OF`.
+
+**Reference:** [Key Search with External Sources](https://docs.confluent.io/cloud/current/ai/external-tables/key-search.html)
 
 ### Regular joins against upsert streams produce changelog output
 

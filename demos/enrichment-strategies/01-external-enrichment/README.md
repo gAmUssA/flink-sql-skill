@@ -18,15 +18,25 @@ orders  ──────────────▶ [ Flink: proc-time JOIN ] 
 
 ## Why this represents "external enrichment"
 
-The article describes a per-record API call. Confluent Cloud Flink doesn't support JDBC lookup joins — the closest pattern is a **Kafka-backed lookup** where the reference table lives in a compacted topic. Flink loads it into task-local state and evaluates the join per-row at processing time.
+This demo is the **Kafka-only approximation** of the article's "external enrichment" pattern — the reference data lives in a compacted Kafka topic rather than an external database. Flink holds the upsert stream's current state in the join operator and evaluates the lookup per row.
 
 **Behavior matches the article's characterization:**
 - ✅ Per-row evaluation
-- ✅ Current value at processing time (no versioning)
-- ✅ Caching happens automatically in the join operator's state
+- ✅ Current value (no versioning)
+- ✅ "Caching" happens automatically in the join operator's state
 - ❌ No external network call per row (Kafka is internal)
 
-For a true per-row HTTP call you'd need a Java `AsyncTableFunction` UDF on Confluent Cloud — but UDFs on CC can't make outbound network calls. That's a hard limitation, not a demo artifact.
+> **For a real external-database or REST API lookup**, see **[Demo 5 — External Key Search](../05-external-key-search/)**. That demo uses Confluent Cloud's **External Tables** feature with `KEY_SEARCH_AGG` against a live REST endpoint (Open Library). It supports `confluent-jdbc` (Postgres/MySQL/SQL Server/Oracle), `rest`, `mongodb`, and `couchbase`.
+
+**When to pick Demo 1 vs Demo 5:**
+
+| Situation                                                  | Demo 1 (Kafka-only) | Demo 5 (External Tables) |
+|------------------------------------------------------------|:-------------------:|:------------------------:|
+| Reference data is already in a Kafka compacted topic       | ✅                  |                          |
+| Reference data lives in a real DB or REST API              |                     | ✅                       |
+| Zero external dependencies / self-contained demo           | ✅                  |                          |
+| You want CC's official lookup pattern                      |                     | ✅                       |
+| You can't (or won't) mirror the DB into Kafka              |                     | ✅                       |
 
 ## Tradeoffs (same as the article)
 

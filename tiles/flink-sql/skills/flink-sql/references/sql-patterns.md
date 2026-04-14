@@ -240,16 +240,25 @@ JOIN customers FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
-> **⚠️ Confluent Cloud:** `PROCTIME()` is **not supported** and there's no JDBC lookup connector. For current-value lookup semantics on CC, use a regular join against an `upsert-kafka` reference table:
+> **⚠️ Confluent Cloud:** `PROCTIME()` is **not supported**. For per-row lookups on CC, pick one of these patterns:
 >
+> **A. External Tables + `KEY_SEARCH_AGG`** (canonical path for real external DB / REST API lookups — supports Postgres, MySQL, SQL Server, Oracle, REST, MongoDB, Couchbase):
+> ```sql
+> SELECT o.order_id, t.name, t.tier
+> FROM orders o,
+> LATERAL TABLE(KEY_SEARCH_AGG(customers_ext, DESCRIPTOR(customer_id), customer_id))
+> CROSS JOIN UNNEST(search_results) AS t(customer_id, name, tier);
+> ```
+> Requires a prior `CREATE CONNECTION` and a `CREATE TABLE ... WITH ('connector' = 'confluent-jdbc', ...)`. See [confluent-cloud.md — External Tables](confluent-cloud.md#external-tables-key-search).
+>
+> **B. Regular join against upsert-kafka** (when the reference data is already in a compacted Kafka topic):
 > ```sql
 > SELECT o.*, c.name
 > FROM orders o
 > LEFT JOIN customers_ref c   -- compacted upsert-kafka
 >   ON o.customer_id = c.id;
 > ```
->
-> This produces a changelog stream, so **the sink must be `changelog.mode = 'upsert'` with a `PRIMARY KEY`**, and the query **cannot** include `CURRENT_TIMESTAMP` or other non-deterministic functions. See [confluent-cloud.md](confluent-cloud.md#proctime-is-not-supported).
+> This produces a changelog stream, so **the sink must be `changelog.mode = 'upsert'` with a `PRIMARY KEY`**, and the query **cannot** include `CURRENT_TIMESTAMP` or other non-deterministic functions.
 
 ### Window Join
 

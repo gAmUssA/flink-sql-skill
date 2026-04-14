@@ -347,25 +347,35 @@ ON o.customer_id = c.id;
 Function 'PROCTIME' is not supported in Confluent's Flink SQL dialect.
 ```
 
-**Cause:** Confluent Cloud Flink has no `PROCTIME()` function and no JDBC lookup connector.
+**Cause:** Confluent Cloud Flink has no `PROCTIME()` function. The textbook temporal lookup-join syntax doesn't compile there.
 
-**Solutions:**
+**Solutions (pick the one that matches your data):**
+
 ```sql
--- Option 1: Regular join against upsert-kafka reference table
---   Emits a changelog stream, so sink must be upsert + PK
+-- Option 1 (CANONICAL): External Table + KEY_SEARCH_AGG
+--   Use this when the reference data lives in a real external DB or REST API.
+--   Requires CREATE CONNECTION + CREATE TABLE ... WITH ('connector' = 'confluent-jdbc',...)
+SELECT o.order_id, t.name, t.tier
+FROM orders o,
+LATERAL TABLE(KEY_SEARCH_AGG(customers_ext, DESCRIPTOR(customer_id), customer_id))
+CROSS JOIN UNNEST(search_results) AS t(customer_id, name, tier);
+
+-- Option 2: Regular join against upsert-kafka reference table
+--   Use this when the reference data is already in a compacted Kafka topic.
+--   Emits a changelog stream, so sink must be upsert + PK.
 SELECT o.*, c.name
 FROM orders o
 LEFT JOIN customers_ref c   -- upsert-kafka, compacted
   ON o.customer_id = c.id;
 
--- Option 2: Event-time temporal join (preferred if you have versioning)
+-- Option 3: Event-time temporal join (if versioning is what you actually want)
 SELECT o.*, c.name
 FROM orders o
 JOIN customers_cdc FOR SYSTEM_TIME AS OF o.order_time AS c
   ON o.customer_id = c.id;
 ```
 
-See [confluent-cloud.md](confluent-cloud.md#proctime-is-not-supported) for the full workaround.
+See [confluent-cloud.md — External Tables](confluent-cloud.md#external-tables-key-search) for the full `KEY_SEARCH_AGG` reference and the upsert-kafka workaround.
 
 ### Error: Sink doesn't support update/delete changes
 
